@@ -1,0 +1,9 @@
+<Project>
+    <ProjectName>RaftInP</ProjectName>
+    <InputFiles>
+        <PFile>./PSpec</PFile>
+        <PFile>./PTst</PFile>
+        <PFile>./PSrc</PFile>
+    </InputFiles>
+    <OutputDir>PGenerated</OutputDir>
+</Project>
