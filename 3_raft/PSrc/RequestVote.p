@@ -4,9 +4,6 @@ type tRequestVoteReply = (term : int, voteGranted: bool);
 event eRequestVoteArgs : tRequestVoteArgs;
 event eRequestVoteReply: tRequestVoteReply;
 
-type tForceTransitionToFollower = (term : int, newTerm : int);
-event eForceTransitionToFollower : tForceTransitionToFollower;
-
 type tTransitionToLeader = (term : int);
 event eTransitionToLeader: tTransitionToLeader;
 

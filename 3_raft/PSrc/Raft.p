@@ -21,6 +21,7 @@ machine Raft {
 
     // Internal Variables 
     var electionTimer : Timer;
+    var heartbeatTimer : Timer;
 
     start state Init {
         entry (config: tRaftConfig) {
@@ -35,18 +36,35 @@ machine Raft {
             nodeState = Follower;
             currentTerm = 0;
             votedFor = -1 ;
+            electionTimer = NewAndStartTimer(this, electionTimeout);
             goto FollowerLoop;
         }
+
+        defer eTimeout;
     }
 
     state FollowerLoop {
         entry {
             assert nodeState == Follower, "In FollowerLoop while state is not Follower";
-            electionTimer = NewAndStartTimer(this, electionTimeout);
 
-            receive  { 
-                case eTimeout: {
-                    StartElection();
+            
+
+            while (true) {
+                assert electionTimer != default(Timer), "No value set on Election timer";
+
+                receive  { 
+                    case eTimeout: {
+                        StartElection();
+                    }
+
+                    case eRequestVoteArgs: (args : tRequestVoteArgs) {
+                        RespondToRequestVote(args);
+                    }
+
+                    case eAppendEntriesArgs: (args : tAppendEntriesArgs)  {
+                        RespondToAppendEntires(args);
+                    }
+
                 }
             }
         }
@@ -61,7 +79,7 @@ machine Raft {
 
             // Ask for Votes from all peers 
             requestVote = new RequestVote((raft = this, peers = peers, term = currentTerm, id = id));
-            electionTimer = NewAndStartTimer(this, electionTimeout);
+            ResetElectionTimer();
 
             
             while (true) {
@@ -86,6 +104,14 @@ machine Raft {
 
                         ConvertToLeader();
                     }
+                    
+                    case eRequestVoteArgs: (args : tRequestVoteArgs) {
+                        RespondToRequestVote(args);
+                    }
+
+                    case eAppendEntriesArgs: (args : tAppendEntriesArgs) {
+                        RespondToAppendEntires(args);
+                    }
                 }
             }
         }
@@ -93,8 +119,67 @@ machine Raft {
 
     state LeaderLoop {
         entry {
+            assert nodeState == Leader, "In LeaderLoop while state is not Leader";
 
+            while (true) {
+                receive { 
+                    case eTimeout: {
+                        SendHeartbeats();
+                    }
+
+                    case eForceTransitionToFollower: (args: tForceTransitionToFollower) {
+                        if (args.term != currentTerm) {
+                            // Ignore this 
+                            continue;
+                        }
+                        ConvertToFollower(args.newTerm);
+                    }
+
+                    case eAppendEntriesArgs: (args : tAppendEntriesArgs) {
+                        RespondToAppendEntires(args);
+                    }
+
+                    case eRequestVoteArgs: (args : tRequestVoteArgs) {
+                        RespondToRequestVote(args);
+                    }
+                }
+            }
         }
+    }
+
+    fun RespondToRequestVote(args : tRequestVoteArgs) {
+        if (currentTerm > args.term) {
+            send args.from, eRequestVoteReply, (term = currentTerm, voteGranted = false);
+            return;
+        }
+
+        if (args.term > currentTerm) {
+            ConvertToFollower(args.term);
+        }
+
+        if (votedFor == -1 || votedFor == args.candidateId) {
+            votedFor = args.candidateId;
+            send args.from, eRequestVoteReply, (term = currentTerm, voteGranted = true);
+            return;
+        } 
+
+        send args.from, eRequestVoteReply, (term = currentTerm, voteGranted = false);
+    }
+
+    fun RespondToAppendEntires(args : tAppendEntriesArgs) {
+        if (currentTerm > args.term) {
+            send args.from, eAppendEntriesReply, (term = currentTerm,  success = false);
+            return;
+        }
+
+        ResetElectionTimer();
+
+        if (args.term > currentTerm) {
+            ConvertToFollower(args.term);
+        }
+
+        send args.from, eAppendEntriesReply, (term = currentTerm, success = true);
+        return;
     }
 
     fun StartElection() {
@@ -108,11 +193,32 @@ machine Raft {
         currentTerm = newTerm;
         votedFor = -1;
         nodeState = Follower;
+        ResetElectionTimer();
         goto FollowerLoop;
     }
 
     fun ConvertToLeader() {
         nodeState = Leader;
+        ResetHeartbeatTimer();
         goto LeaderLoop;
     }
+
+    fun ResetElectionTimer() {
+        CancelTimer(electionTimer);
+        electionTimer = NewAndStartTimer(this, electionTimeout);
+    }
+
+    fun ResetHeartbeatTimer() {
+        CancelTimer(heartbeatTimer);
+        heartbeatTimer = NewAndStartTimer(this, heartbeatTimeout);
+    }
+
+    fun SendHeartbeats() {
+        var appendEntries : AppendEntries;
+        appendEntries = new AppendEntries((raft = this, peers = peers, term = currentTerm, id = id));
+        ResetHeartbeatTimer();
+    }
 }
+
+type tForceTransitionToFollower = (term : int, newTerm : int);
+event eForceTransitionToFollower : tForceTransitionToFollower;

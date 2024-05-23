@@ -41,7 +41,7 @@ machine Timer {
         entry {
         // Do Nothing 
         }
-        ignore _eNextTick;
+        ignore _eNextTick, _cancelTimer;
     }
 }
 
