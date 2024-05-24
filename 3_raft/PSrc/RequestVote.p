@@ -12,9 +12,11 @@ machine RequestVote {
     var raftMachine : Raft;
 
     start state Init {
-        entry (config : (raft : Raft, peers : seq[Raft], term : int, id : int))  {
+        entry (config : (raft : Raft, peers : seq[Raft], term : int, id : int, heartbeatTimeout: int))  {
             var peer : Raft;
             var responseRecived, totalVotes : int;
+            var timer : Timer;
+            var sentElectionResult : bool;
 
             raftMachine = config.raft;
 
@@ -25,6 +27,8 @@ machine RequestVote {
             responseRecived = 0;
             totalVotes = 1;
 
+            timer = NewAndStartTimer(this, config.heartbeatTimeout * 2, 0);
+
             while (responseRecived < sizeof(config.peers)) {
                 receive { 
                     case eRequestVoteReply: (reply: tRequestVoteReply) {
@@ -33,15 +37,32 @@ machine RequestVote {
                         } else if (reply.voteGranted) {
                             totalVotes = totalVotes + 1;
 
-                            if (totalVotes > sizeof(config.peers) / 2) {
+                            if (!sentElectionResult && totalVotes > sizeof(config.peers) / 2) {
                                 send raftMachine, eTransitionToLeader, (term = config.term,);
+                                CancelTimer(timer);
+                                sentElectionResult = true;
+                                goto Done;
                             }
+
                         } 
+                    }
+
+                    case eTimeout: (args : tTimeout) {
+                        goto Done;
                     }
                 }
 
                 responseRecived = responseRecived + 1;
             }
+
+            goto Done;
+        }
+    }
+
+    state Done {
+        ignore eTimeout, eRequestVoteReply;
+        entry {
+            // Do nothing
         }
     }
 }

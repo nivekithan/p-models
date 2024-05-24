@@ -1,17 +1,20 @@
 
 event _eStartTimer;
-event eTimeout;
+type tTimeout = (term : int);
+event eTimeout : tTimeout;
 event _eNextTick;
 event _cancelTimer;
 
 machine Timer {
     var client : machine;
     var ticks : int;
+    var term : int;
 
     start state Init {
-        entry (config : (client : machine, ticks : int)) {
+        entry (config : (client : machine, ticks : int, term : int)) {
             client = config.client;
             ticks = config.ticks;
+            term = config.term;
         }
 
         on _eStartTimer goto TimerStarted;
@@ -23,7 +26,7 @@ machine Timer {
                 ticks = ticks - 1;
 
                 if (ticks == 0) {
-                    send client, eTimeout;
+                    send client, eTimeout, (term = term,);
                     goto Done;
                 }
 
@@ -45,8 +48,8 @@ machine Timer {
     }
 }
 
-fun NewTimer(client : machine, ticks : int) : Timer {
-    return new Timer((client = client, ticks = ticks));
+fun NewTimer(client : machine, ticks : int, term : int) : Timer {
+    return new Timer((client = client, ticks = ticks, term = term));
 }
 
 fun StartTimer(timer : Timer) {
@@ -54,9 +57,9 @@ fun StartTimer(timer : Timer) {
 }
 
 
-fun NewAndStartTimer(client : machine, ticks : int) : Timer {
+fun NewAndStartTimer(client : machine, ticks : int, term : int) : Timer {
     var timer : Timer;
-    timer = NewTimer(client, ticks);
+    timer = NewTimer(client, ticks, term);
     StartTimer(timer);
     return timer;
 }
