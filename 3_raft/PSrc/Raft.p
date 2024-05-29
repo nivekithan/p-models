@@ -51,135 +51,138 @@ machine Raft {
             electionTimer = NewAndStartTimer(this, RandomTimeout(electionTimeout), currentTerm);
             _maxHeartbeats = config._maxHeartbeats;
             _trackedHeartbeats = 0;
-            goto FollowerLoop;
+            goto MainLoop;
         }
         defer eTimeout, eAppendEntriesArgs, eRequestVoteArgs;
     }
 
-    state FollowerLoop {
+    state MainLoop {
         entry {
-            assert nodeState == Follower, "In FollowerLoop while state is not Follower";
-
             while (true) {
-                assert electionTimer != default(Timer), "No value set on Election timer";
-
-                receive  { 
-                    case eTimeout: (args : tTimeout) {
-                        if (args.term != currentTerm) {
-                            // Ignore this event
-                            continue;
-                        }
-                        StartElection();
-                    }
-
-                    case eRequestVoteArgs: (args : tRequestVoteArgs) {
-                        RespondToRequestVote(args);
-                    }
-
-                    case eAppendEntriesArgs: (args : tAppendEntriesArgs)  {
-                        RespondToAppendEntires(args);
-                    }
-
-                    case eDone: {
-                        Close();
-                    }
-
-                }
+                if (nodeState == Follower) {
+                    FollowerLoop();
+                } else if (nodeState == Candidate) {
+                    CandidateLoop();
+                } else if (nodeState == Leader) {
+                    LeaderLoop();
+                } 
             }
         }
     }
 
-    state CandidateLoop {
-        entry {
-            var requestVote : RequestVote ;
-            
-            assert nodeState == Candidate, "In CandidateLoop while state is not Candidate";
-            assert votedFor == id, "In CandidateLoop while votedFor is not id";
+    fun FollowerLoop() {
+        assert nodeState == Follower, "In FollowerLoop while state is not Follower";
 
-            // Ask for Votes from all peers 
-            requestVote = new RequestVote((raft = this, peers = peers, term = currentTerm, id = id, heartbeatTimeout = heartbeatTimeout));
-            ResetElectionTimer();
+        while (nodeState == Follower) {
+            assert electionTimer != default(Timer), "No value set on Election timer";
 
-            
-            while (true) {
-                receive {
-                    case eTimeout: (args : tTimeout) {
-                        if (args.term != currentTerm) {
-                            // Ignore this event
-                            continue;
-                        }
-                        StartElection();
-                    } 
-
-                    case eForceTransitionToFollower: (args: tForceTransitionToFollower) {
-                        if (args.term != currentTerm) {
-                            // Ignore this event
-                            continue;
-                        }
-                        ConvertToFollower(args.newTerm);
+            receive  { 
+                case eTimeout: (args : tTimeout) {
+                    if (args.term != currentTerm) {
+                        // Ignore this event
+                        continue;
                     }
-
-                    case eTransitionToLeader: (args: tTransitionToLeader) {
-                        if (args.term != currentTerm) {
-                            print "Ignoring transition to leader event";
-                            // Ignore this event
-                            continue;
-                        }
-
-                        ConvertToLeader();
-                    }
-                    
-                    case eRequestVoteArgs: (args : tRequestVoteArgs) {
-                        RespondToRequestVote(args);
-                    }
-
-                    case eAppendEntriesArgs: (args : tAppendEntriesArgs) {
-                        RespondToAppendEntires(args);
-                    }
-
-                    case eDone: {
-                        Close();
-                    }
-
+                    StartElection();
                 }
+
+                case eRequestVoteArgs: (args : tRequestVoteArgs) {
+                    RespondToRequestVote(args);
+                }
+
+                case eAppendEntriesArgs: (args : tAppendEntriesArgs)  {
+                    RespondToAppendEntires(args);
+                }
+
+                case eDone: {
+                    Close();
+                }
+
             }
         }
     }
 
-    state LeaderLoop {
-        entry {
-            assert nodeState == Leader, "In LeaderLoop while state is not Leader";
+    fun CandidateLoop() {
+        
+        assert nodeState == Candidate, "In CandidateLoop while state is not Candidate";
+        assert votedFor == id, "In CandidateLoop while votedFor is not id";
 
-            while (true) {
-                receive { 
-                    case eTimeout: (args : tTimeout) {
-                        if (args.term != currentTerm) {
-                            // Ignore this event
-                            continue;
-                        }
-                        SendHeartbeats();
-                        ResetHeartbeatTimer();
+
+        
+        while (nodeState == Candidate) {
+            receive {
+                case eTimeout: (args : tTimeout) {
+                    if (args.term != currentTerm) {
+                        // Ignore this event
+                        continue;
+                    }
+                    StartElection();
+                } 
+
+                case eForceTransitionToFollower: (args: tForceTransitionToFollower) {
+                    if (args.term != currentTerm) {
+                        // Ignore this event
+                        continue;
+                    }
+                    ConvertToFollower(args.newTerm);
+                }
+
+                case eTransitionToLeader: (args: tTransitionToLeader) {
+                    if (args.term != currentTerm) {
+                        print "Ignoring transition to leader event";
+                        // Ignore this event
+                        continue;
                     }
 
-                    case eForceTransitionToFollower: (args: tForceTransitionToFollower) {
-                        if (args.term != currentTerm) {
-                            // Ignore this 
-                            continue;
-                        }
-                        ConvertToFollower(args.newTerm);
-                    }
+                    ConvertToLeader();
+                }
+                
+                case eRequestVoteArgs: (args : tRequestVoteArgs) {
+                    RespondToRequestVote(args);
+                }
 
-                    case eAppendEntriesArgs: (args : tAppendEntriesArgs) {
-                        RespondToAppendEntires(args);
-                    }
+                case eAppendEntriesArgs: (args : tAppendEntriesArgs) {
+                    RespondToAppendEntires(args);
+                }
 
-                    case eRequestVoteArgs: (args : tRequestVoteArgs) {
-                        RespondToRequestVote(args);
-                    }
+                case eDone: {
+                    Close();
+                }
 
-                    case eDone: {
-                        Close();
+            }
+        }
+    }
+
+    fun LeaderLoop() {
+        assert nodeState == Leader, "In LeaderLoop while state is not Leader";
+
+        while (nodeState == Leader) {
+            receive { 
+                case eTimeout: (args : tTimeout) {
+                    if (args.term != currentTerm) {
+                        // Ignore this event
+                        continue;
                     }
+                    SendHeartbeats();
+                }
+
+                case eForceTransitionToFollower: (args: tForceTransitionToFollower) {
+                    if (args.term != currentTerm) {
+                        // Ignore this 
+                        continue;
+                    }
+                    ConvertToFollower(args.newTerm);
+                }
+
+                case eAppendEntriesArgs: (args : tAppendEntriesArgs) {
+                    RespondToAppendEntires(args);
+                }
+
+                case eRequestVoteArgs: (args : tRequestVoteArgs) {
+                    RespondToRequestVote(args);
+                }
+
+                case eDone: {
+                    Close();
                 }
             }
         }
@@ -192,9 +195,7 @@ machine Raft {
         }
 
         if (args.term > currentTerm) {
-            currentTerm = args.term;
-            votedFor = -1;
-            send this, eForceTransitionToFollower, (term = args.term, newTerm = args.term);
+            ConvertToFollower(args.term);
         }
 
         if (votedFor == -1 || votedFor == args.candidateId) {
@@ -207,8 +208,6 @@ machine Raft {
     }
 
     fun RespondToAppendEntires(args : tAppendEntriesArgs) {
-        var termUpdated : bool;
-        termUpdated = false;
         if (currentTerm > args.term) {
             send args.from, eAppendEntriesReply, (term = currentTerm,  success = false);
             return;
@@ -216,26 +215,23 @@ machine Raft {
 
 
         if (args.term > currentTerm) {
-            currentTerm = args.term;
-            votedFor = -1;
-            termUpdated = true;
+            ConvertToFollower(args.term);
         }
 
         ResetElectionTimer();
         send args.from, eAppendEntriesReply, (term = currentTerm, success = true);
-        if (termUpdated) {
-            send this, eForceTransitionToFollower, (term = args.term, newTerm = args.term);
-        }
         return;
     }
 
     fun StartElection() {
+        var requestVote : RequestVote ;
         currentTerm = currentTerm + 1;
         votedFor = id;
         nodeState = Candidate;
+        requestVote = new RequestVote((raft = this, peers = peers, term = currentTerm, id = id, heartbeatTimeout = heartbeatTimeout));
+        ResetElectionTimer();
         announce eStateUpdate, (id = id, newState = Candidate) ;
         _trackedHeartbeats = 0;
-        goto CandidateLoop;
     }
 
     fun ConvertToFollower(newTerm: int) {
@@ -249,16 +245,13 @@ machine Raft {
         }
 
         _trackedHeartbeats = 0;
-        goto FollowerLoop;
     }
 
     fun ConvertToLeader() {
         nodeState = Leader;
         announce eStateUpdate, (id = id, newState = Leader) ;
         SendHeartbeats();
-        ResetHeartbeatTimer();
         _trackedHeartbeats = 0;
-        goto LeaderLoop;
     }
 
     fun ResetElectionTimer() {
@@ -290,10 +283,11 @@ machine Raft {
     fun StopTesting() {
         var peer : Raft;
 
-        send this, eDone;
         foreach (peer in peers) {
             send peer, eDone;
         }
+
+        goto Done;
     }
 
     fun Close() {

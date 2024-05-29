@@ -39,9 +39,7 @@ machine RequestVote {
 
                             if (!sentElectionResult && totalVotes > sizeof(config.peers) / 2) {
                                 send raftMachine, eTransitionToLeader, (term = config.term,);
-                                CancelTimer(timer);
                                 sentElectionResult = true;
-                                goto Done;
                             }
 
                         } 
